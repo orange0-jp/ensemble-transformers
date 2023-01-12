@@ -5,12 +5,20 @@ from torch import nn
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_outputs import Seq2SeqLMOutput
 from transformers.modeling_utils import PreTrainedModel
+from transformers.models.vision_encoder_decoder.modeling_vision_encoder_decoder import \
+    VISION_ENCODER_DECODER_INPUTS_DOCSTRING  # noqa
+from transformers.utils import add_start_docstrings_to_model_forward
 
 from ..generation.utils import EnsembleGenerationMixin
 
 
 class EnsembleForVisionEncoderDecoderModel(EnsembleGenerationMixin,
                                            PreTrainedModel):
+    r"""
+    [`EnsembleForVisionEncoderDecoderModel`] is a generic ensemble model class
+    for VisionEncoderDecoderModel.
+    """
+
     main_input_name = 'pixel_values'
 
     def __init__(self, models: List[PreTrainedModel],
@@ -32,6 +40,8 @@ class EnsembleForVisionEncoderDecoderModel(EnsembleGenerationMixin,
             return False
         return True
 
+    @add_start_docstrings_to_model_forward(
+        VISION_ENCODER_DECODER_INPUTS_DOCSTRING)
     def forward(
         self,
         pixel_values: Optional[List[torch.LongTensor]] = None,

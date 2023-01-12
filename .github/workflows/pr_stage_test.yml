@@ -35,7 +35,8 @@ jobs:
         run: pip install torch==${{matrix.torch}}+cpu torchvision==${{matrix.torchvision}}+cpu -f https://download.pytorch.org/whl/torch_stable.html
       - name: Install ensemble_transformers dependencies
         run: |
-          pip install -r requirements.txt
+          pip install -r requirements/requirements.txt
+          pip install -r requirements/tests.txt
       - name: Build and install
         run: pip install -e .
       - name: Run unittests and generate coverage report
