@@ -1,0 +1,6 @@
+sphinx==4.5.0
+sphinx-autodoc-typehints
+sphinx-copybutton
+sphinx-notfound-page
+sphinx-tabs
+sphinx_rtd_theme==0.5.2
