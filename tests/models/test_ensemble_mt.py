@@ -57,7 +57,8 @@ def test_inference():
 
     # contrastive search
     with pytest.raises(NotImplementedError):
-        generated_ids = model.generate(input_ids, penalty_alpha=0.6, top_k=4, num_beams=1)
+        generated_ids = model.generate(
+            input_ids, penalty_alpha=0.6, top_k=4, num_beams=1)
 
     # constrained_beam_search
     force_words_ids = [

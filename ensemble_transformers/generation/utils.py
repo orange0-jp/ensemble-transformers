@@ -34,10 +34,14 @@ class EnsembleGenerationMixin(GenerationMixin):
         **model_kwargs,
     ) -> Tuple[torch.LongTensor, Dict[str, Any]]:
         """Expands tensors from [batch_size, ...] to [batch_size * expand_size, ...]"""
+
         def _expand_dict_for_generation(dict_to_expand):
             for key in dict_to_expand:
-                if dict_to_expand[key] is not None and isinstance(dict_to_expand[key], torch.Tensor):
-                    dict_to_expand[key] = dict_to_expand[key].repeat_interleave(expand_size, dim=0)
+                if dict_to_expand[key] is not None and isinstance(
+                        dict_to_expand[key], torch.Tensor):
+                    dict_to_expand[key] = dict_to_expand[
+                        key].repeat_interleave(
+                            expand_size, dim=0)
             return dict_to_expand
 
         if input_ids is not None:
@@ -51,7 +55,7 @@ class EnsembleGenerationMixin(GenerationMixin):
                 raise ValueError(
                     'If `is_encoder_decoder` is True, make sure that `encoder_outputs` is defined.'
                 )
-            
+
             # Fix for ensemble
             for encoder_output in encoder_outputs:
                 encoder_output[
@@ -328,7 +332,8 @@ class EnsembleGenerationMixin(GenerationMixin):
                 largest=True,
                 sorted=True)
 
-            next_indices = torch.div(next_tokens, vocab_size, rounding_mode="floor")
+            next_indices = torch.div(
+                next_tokens, vocab_size, rounding_mode='floor')
             next_tokens = next_tokens % vocab_size
 
             # stateless
@@ -893,7 +898,8 @@ class EnsembleGenerationMixin(GenerationMixin):
                 next_token_scores, descending=True, dim=1)
             next_tokens = torch.gather(next_tokens, -1, _indices)
 
-            next_indices = torch.div(next_tokens, vocab_size, rounding_mode="floor")
+            next_indices = torch.div(
+                next_tokens, vocab_size, rounding_mode='floor')
             next_tokens = next_tokens % vocab_size
 
             # stateless
@@ -1204,7 +1210,8 @@ class EnsembleGenerationMixin(GenerationMixin):
                     largest=True,
                     sorted=True)
 
-                next_indices = torch.div(next_tokens, vocab_size, rounding_mode="floor")
+                next_indices = torch.div(
+                    next_tokens, vocab_size, rounding_mode='floor')
                 next_tokens = next_tokens % vocab_size
 
                 # stateless
@@ -1240,7 +1247,8 @@ class EnsembleGenerationMixin(GenerationMixin):
                 # (beam_idx // group_size) -> batch_idx
                 # (beam_idx % group_size) -> offset of idx inside the group
                 reordering_indices[batch_group_indices] = (
-                    num_beams * torch.div(beam_idx, group_size, rounding_mode="floor") +
+                    num_beams *
+                    torch.div(beam_idx, group_size, rounding_mode='floor') +
                     group_start_idx + (beam_idx % group_size))
 
             # Store scores, attentions and hidden_states when required
