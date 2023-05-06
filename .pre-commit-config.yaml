@@ -1,10 +1,10 @@
 repos:
-  - repo: https://gitlab.com/pycqa/flake8.git
-    rev: 3.8.3
+  - repo: https://github.com/PyCQA/flake8
+    rev: 4.0.1
     hooks:
       - id: flake8
-  - repo: https://github.com/timothycrosley/isort
-    rev: 5.10.1
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.11.5
     hooks:
       - id: isort
   - repo: https://github.com/pre-commit/mirrors-yapf
@@ -37,7 +37,7 @@ repos:
     rev: v2.1.0
     hooks:
       - id: codespell
-        entry: codespell --skip="configs/*"
+        args: ["--skip", "custom_det/core/evaluation/ot_cost.py"]
   - repo: https://github.com/myint/docformatter
     rev: v1.3.1
     hooks:
