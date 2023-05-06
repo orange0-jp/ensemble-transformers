@@ -87,7 +87,8 @@ class EnsembleForVisionEncoderDecoderModel(EnsembleGenerationMixin,
         *args,
         **kwargs,
     ):
-        if 'past_key_values' in kwargs and kwargs['past_key_values'][0] is None:
+        if 'past_key_values' in kwargs and kwargs['past_key_values'][
+                0] is None:  # noqa
             kwargs['past_key_values'] = None
         return self.models[0].prepare_inputs_for_generation(*args, **kwargs)
 
