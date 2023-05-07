@@ -1,34 +1,20 @@
 name: pr_stage_test
 
-on:
-  pull_request:
-    paths-ignore:
-      - 'README.md'
-      - 'docs/**'
-      - 'demo/**'
-      - 'tools/**'
-      - 'configs/**'
-      - '.dev_scripts/**'
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+on: [ pull_request ]
 
 jobs:
   build:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.8.12]
         include:
-          - torch: 1.12.1
-            torchvision: 0.13.1
+          - torch: 1.13.1
+            torchvision: 0.14.1
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v3
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.9'
       - name: Upgrade pip
         run: pip install pip --upgrade
       - name: Install PyTorch
@@ -39,17 +25,5 @@ jobs:
           pip install -r requirements/tests.txt
       - name: Build and install
         run: pip install -e .
-      - name: Run unittests and generate coverage report
-        run: |
-          coverage run --branch --source ensemble_transformers -m pytest tests/
-          coverage xml
-          coverage report -m
-      # Upload coverage report for python3.7 && pytorch1.8.1 cpu
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v1.0.14
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          env_vars: OS,PYTHON
-          name: codecov-umbrella
-          fail_ci_if_error: false
+      - name: Run test
+        run: pytest tests
