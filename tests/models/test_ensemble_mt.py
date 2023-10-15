@@ -58,7 +58,7 @@ def test_inference():
     # contrastive search
     with pytest.raises(NotImplementedError):
         generated_ids = model.generate(
-            input_ids, penalty_alpha=0.6, top_k=4, num_beams=1)
+            input_ids, penalty_alpha=0.6, top_k=4, num_beams=1, use_cache=True)
 
     # constrained_beam_search
     force_words_ids = [
@@ -89,10 +89,7 @@ def test_inference():
 
     # group beam search
     generated_ids = model.generate(
-        input_ids,
-        num_beams=4,
-        num_beam_groups=2,
-    )
+        input_ids, num_beams=4, num_beam_groups=2, diversity_penalty=10.0)
     generated_text = tokenizer.decode(
         generated_ids[0], skip_special_tokens=True)
     score = jaccard_similarity(
