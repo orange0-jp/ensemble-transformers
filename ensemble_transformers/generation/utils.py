@@ -101,6 +101,8 @@ class EnsembleGenerationMixin(GenerationMixin):
         # update past_key_values
         model_kwargs['past_key_values'] = self._extract_past_from_model_output(
             outputs, standardize_cache_format=standardize_cache_format)
+        if getattr(outputs, 'state', None) is not None:
+            model_kwargs['state'] = outputs.state
 
         # update token_type_ids with last value
         if 'token_type_ids' in model_kwargs:
@@ -145,7 +147,7 @@ class EnsembleGenerationMixin(GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         output_scores: Optional[bool] = None,
         return_dict_in_generate: Optional[bool] = None,
-        synced_gpus: Optional[bool] = False,
+        synced_gpus: bool = False,
         **model_kwargs,
     ) -> Union[BeamSearchOutput, torch.LongTensor]:
         r"""
@@ -290,10 +292,6 @@ class EnsembleGenerationMixin(GenerationMixin):
                 continue  # don't waste resources running the code we don't need
 
             next_token_logits = outputs.logits[:, -1, :]
-            # hack: adjust tokens for Marian. For Marian we have to make sure that the `pad_token_id`
-            # cannot be generated both before and after the `nn.functional.log_softmax` operation.
-            next_token_logits = self.adjust_logits_during_generation(
-                next_token_logits, cur_len=cur_len)
             next_token_scores = nn.functional.log_softmax(
                 next_token_logits,
                 dim=-1)  # (batch_size * num_beams, vocab_size)
@@ -301,7 +299,7 @@ class EnsembleGenerationMixin(GenerationMixin):
             next_token_scores_processed = logits_processor(
                 input_ids, next_token_scores)
             next_token_scores = next_token_scores_processed + beam_scores[:, None].expand_as(
-                next_token_scores)
+                next_token_scores_processed)
 
             # Store scores, attentions and hidden_states when required
             if return_dict_in_generate:
@@ -324,10 +322,11 @@ class EnsembleGenerationMixin(GenerationMixin):
             next_token_scores = next_token_scores.view(batch_size,
                                                        num_beams * vocab_size)
 
-            # Sample 2 next tokens for each beam (so we have some spare tokens and match output of beam search)
+            # Sample 1 + len(eos_token_id) next tokens for each beam so we have at least 1 non eos token per beam.
+            n_eos_tokens = len(eos_token_id) if eos_token_id else 0
             next_token_scores, next_tokens = torch.topk(
                 next_token_scores,
-                2 * num_beams,
+                max(2, 1 + n_eos_tokens) * num_beams,
                 dim=1,
                 largest=True,
                 sorted=True)
@@ -516,8 +515,21 @@ class EnsembleGenerationMixin(GenerationMixin):
             return_dict_in_generate if return_dict_in_generate is not None else
             self.generation_config.return_dict_in_generate)
 
+        batch_size = len(constrained_beam_scorer._beam_hyps)
+        num_beams = constrained_beam_scorer.num_beams
+
+        batch_beam_size, cur_len = input_ids.shape
+
+        if num_beams * batch_size != batch_beam_size:
+            raise ValueError(
+                f'Batch dimension of `input_ids` should be {num_beams * batch_size}, but is {batch_beam_size}.'
+            )
+
         # init attention / hidden states / scores tuples
         scores = () if (return_dict_in_generate and output_scores) else None
+        beam_indices = (
+            tuple(() for _ in range(batch_beam_size)) if
+            (return_dict_in_generate and output_scores) else None)
         decoder_attentions = () if (return_dict_in_generate
                                     and output_attentions) else None
         cross_attentions = () if (return_dict_in_generate
@@ -579,10 +591,6 @@ class EnsembleGenerationMixin(GenerationMixin):
                 continue  # don't waste resources running the code we don't need
 
             next_token_logits = outputs.logits[:, -1, :]
-            # hack: adjust tokens for Marian. For Marian we have to make sure that the `pad_token_id`
-            # cannot be generated both before and after the `nn.functional.log_softmax` operation.
-            next_token_logits = self.adjust_logits_during_generation(
-                next_token_logits, cur_len=cur_len)
             next_token_scores = nn.functional.log_softmax(
                 next_token_logits,
                 dim=-1)  # (batch_size * num_beams, vocab_size)
@@ -591,7 +599,7 @@ class EnsembleGenerationMixin(GenerationMixin):
                 input_ids, next_token_scores)
 
             next_token_scores = next_token_scores_processed + beam_scores[:, None].expand_as(
-                next_token_scores)
+                next_token_scores_processed)
 
             scores_for_all_vocab = next_token_scores.clone()
 
@@ -616,10 +624,11 @@ class EnsembleGenerationMixin(GenerationMixin):
             next_token_scores = next_token_scores.view(batch_size,
                                                        num_beams * vocab_size)
 
-            # Sample 2 next tokens for each beam (so we have some spare tokens and match output of beam search)
+            # Sample 1 + len(eos_token_id) next tokens for each beam so we have at least 1 non eos token per beam.
+            n_eos_tokens = len(eos_token_id) if eos_token_id else 0
             next_token_scores, next_tokens = torch.topk(
                 next_token_scores,
-                2 * num_beams,
+                max(2, 1 + n_eos_tokens) * num_beams,
                 dim=1,
                 largest=True,
                 sorted=True)
@@ -636,6 +645,7 @@ class EnsembleGenerationMixin(GenerationMixin):
                 scores_for_all_vocab,
                 pad_token_id=pad_token_id,
                 eos_token_id=eos_token_id,
+                beam_indices=beam_indices,
             )
             beam_scores = beam_outputs['next_beam_scores']
             beam_next_tokens = beam_outputs['next_beam_tokens']
@@ -655,6 +665,11 @@ class EnsembleGenerationMixin(GenerationMixin):
                     model_kwargs['past_key_values'][i] = self._reorder_cache(
                         model_kwargs['past_key_values'][i], beam_idx)
 
+            if return_dict_in_generate and output_scores:
+                beam_indices = tuple(
+                    (beam_indices[beam_idx[i]] + (beam_idx[i], )
+                     for i in range(len(beam_indices))))
+
             # increase cur_len
             cur_len = cur_len + 1
 
@@ -673,6 +688,7 @@ class EnsembleGenerationMixin(GenerationMixin):
             pad_token_id=pad_token_id,
             eos_token_id=eos_token_id,
             max_length=stopping_criteria.max_length,
+            beam_indices=beam_indices,
         )
 
         if return_dict_in_generate:
@@ -683,6 +699,7 @@ class EnsembleGenerationMixin(GenerationMixin):
                     sequences=sequence_outputs['sequences'],
                     sequences_scores=sequence_outputs['sequence_scores'],
                     scores=scores,
+                    beam_indices=sequence_outputs['beam_indices'],
                     encoder_attentions=encoder_attentions,
                     encoder_hidden_states=encoder_hidden_states,
                     decoder_attentions=decoder_attentions,
@@ -694,6 +711,7 @@ class EnsembleGenerationMixin(GenerationMixin):
                     sequences=sequence_outputs['sequences'],
                     sequences_scores=sequence_outputs['sequence_scores'],
                     scores=scores,
+                    beam_indices=sequence_outputs['beam_indices'],
                     attentions=decoder_attentions,
                     hidden_states=decoder_hidden_states,
                 )
@@ -714,7 +732,7 @@ class EnsembleGenerationMixin(GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         output_scores: Optional[bool] = None,
         return_dict_in_generate: Optional[bool] = None,
-        synced_gpus: Optional[bool] = False,
+        synced_gpus: bool = False,
         **model_kwargs,
     ) -> Union[BeamSampleOutput, torch.LongTensor]:
         r"""
@@ -852,10 +870,6 @@ class EnsembleGenerationMixin(GenerationMixin):
 
             next_token_logits = outputs.logits[:, -1, :]
 
-            # hack: adjust tokens for Marian. For Marian we have to make sure that the `pad_token_id`
-            # cannot be generated both before and after the `nn.functional.log_softmax` operation.
-            next_token_logits = self.adjust_logits_during_generation(
-                next_token_logits, cur_len=cur_len)
             next_token_scores = nn.functional.log_softmax(
                 next_token_logits,
                 dim=-1)  # (batch_size * num_beams, vocab_size)
@@ -863,7 +877,7 @@ class EnsembleGenerationMixin(GenerationMixin):
             next_token_scores_processed = logits_processor(
                 input_ids, next_token_scores)
             next_token_scores = next_token_scores_processed + beam_scores[:, None].expand_as(
-                next_token_scores)
+                next_token_scores_processed)
             next_token_scores = logits_warper(input_ids, next_token_scores)
 
             # Store scores, attentions and hidden_states when required
@@ -997,7 +1011,7 @@ class EnsembleGenerationMixin(GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         output_scores: Optional[bool] = None,
         return_dict_in_generate: Optional[bool] = None,
-        synced_gpus: Optional[bool] = False,
+        synced_gpus: bool = False,
         **model_kwargs,
     ):
         r"""
@@ -1072,10 +1086,10 @@ class EnsembleGenerationMixin(GenerationMixin):
             return_dict_in_generate if return_dict_in_generate is not None else
             self.generation_config.return_dict_in_generate)
 
-        batch_size = len(beam_scorer._beam_hyps)
         num_beams = beam_scorer.num_beams
         num_beam_groups = beam_scorer.num_beam_groups
         num_sub_beams = num_beams // num_beam_groups
+        batch_size = len(beam_scorer._beam_hyps) // num_beam_groups
         device = input_ids.device
 
         batch_beam_size, cur_len = input_ids.shape
@@ -1175,10 +1189,6 @@ class EnsembleGenerationMixin(GenerationMixin):
                 # select outputs of beams of current group only
                 next_token_logits = outputs.logits[batch_group_indices, -1, :]
 
-                # hack: adjust tokens for Marian. For Marian we have to make sure that the `pad_token_id`
-                # cannot be generated both before and after the `nn.functional.log_softmax` operation.
-                next_token_logits = self.adjust_logits_during_generation(
-                    next_token_logits, cur_len=cur_len)
                 next_token_scores = nn.functional.log_softmax(
                     next_token_logits,
                     dim=-1)  # (batch_size * group_size, vocab_size)
@@ -1202,10 +1212,11 @@ class EnsembleGenerationMixin(GenerationMixin):
                 next_token_scores = next_token_scores.view(
                     batch_size, group_size * vocab_size)
 
-                # Sample 2 next tokens for each beam (so we have some spare tokens and match output of beam search)
+                # Sample 1 + len(eos_token_id) next tokens for each beam so we have at least 1 non eos token per beam.
+                n_eos_tokens = len(eos_token_id) if eos_token_id else 0
                 next_token_scores, next_tokens = torch.topk(
                     next_token_scores,
-                    2 * group_size,
+                    max(2, 1 + n_eos_tokens) * group_size,
                     dim=1,
                     largest=True,
                     sorted=True)
@@ -1225,6 +1236,7 @@ class EnsembleGenerationMixin(GenerationMixin):
                     pad_token_id=pad_token_id,
                     eos_token_id=eos_token_id,
                     beam_indices=process_beam_indices,
+                    group_index=beam_group_idx,
                 )
                 beam_scores[batch_group_indices] = beam_outputs[
                     'next_beam_scores']
